@@ -26,10 +26,11 @@ import HZX.Core.Scalar
 type Rule = Diagram -> Maybe Diagram
 
 hadamardEdgeSimp :: Rule
-hadamardEdgeSimp d = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d)
+hadamardEdgeSimp d = IM.foldrWithKey tryVertex Nothing (_vertices d)
   where
-    tryVertex v = case IM.lookup v (_vertices d) of
-      Just HBox -> do
+    tryVertex v HBox acc = case acc of
+      Just _ -> acc
+      Nothing -> do
         nb <- IM.lookup v (_neighborMap d)
         let ns = M.toList nb
         case ns of
@@ -38,7 +39,7 @@ hadamardEdgeSimp d = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d)
                 d2 = addEdge a b Hadamard d1
             in Just d2
           _ -> Nothing
-      _ -> Nothing
+    tryVertex _ _ acc = acc
 
 spiderFusion :: Rule
 spiderFusion d = listToMaybe $ mapMaybe tryPair pairs
@@ -66,35 +67,37 @@ spiderFusion d = listToMaybe $ mapMaybe tryPair pairs
         return dFinal
 
 identityRemoval :: Rule
-identityRemoval d = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d)
+identityRemoval d = IM.foldrWithKey tryVertex Nothing (_vertices d)
   where
-    tryVertex v = case IM.lookup v (_vertices d) of
-      Just (Z 0) -> checkAndRemove v
-      Just (X 0) -> checkAndRemove v
-      _          -> Nothing
+    tryVertex v (Z 0) acc = tryRemove acc v
+    tryVertex v (X 0) acc = tryRemove acc v
+    tryVertex _ _ acc     = acc
 
-    checkAndRemove v = do
-      nb <- IM.lookup v (_neighborMap d)
-      let ns = M.toList nb
-      case ns of
-        [(a, b1), (b, b2)]
-          | a /= b
-          , simpleCount b1 > 0 && hadamardCount b1 == 0
-          , simpleCount b2 > 0 && hadamardCount b2 == 0 ->
-              let d1 = removeVertex v d
-                  d2 = addEdge a b Simple d1
-              in Just d2
-        _ -> Nothing
+    tryRemove acc v = case acc of
+      Just _ -> acc
+      Nothing -> do
+        nb <- IM.lookup v (_neighborMap d)
+        let ns = M.toList nb
+        case ns of
+          [(a, b1), (b, b2)]
+            | a /= b
+            , simpleCount b1 > 0 && hadamardCount b1 == 0
+            , simpleCount b2 > 0 && hadamardCount b2 == 0 ->
+                let d1 = removeVertex v d
+                    d2 = addEdge a b Simple d1
+                in Just d2
+          _ -> Nothing
 
 -- | Color change rule: convert X spiders to Z spiders.
 -- Only converts X -> Z, not Z -> X, to avoid infinite loops when
 -- used with 'runStrategy'.
 colorChange :: Rule
-colorChange d = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d)
+colorChange d = IM.foldrWithKey tryVertex Nothing (_vertices d)
   where
-    tryVertex v = case IM.lookup v (_vertices d) of
-      Just (X p) -> Just (flipColor v p Z)
-      _          -> Nothing
+    tryVertex v (X p) acc = case acc of
+      Just _ -> acc
+      Nothing -> Just (flipColor v p Z)
+    tryVertex _ _ acc     = acc
 
     flipColor v p newTy =
       let nb = neighborBundles v d
@@ -131,67 +134,80 @@ hopfRule d = listToMaybe $ mapMaybe tryEdge $ M.toList (_edges d)
       in Just d'
 
 selfLoopRemoval :: Rule
-selfLoopRemoval d = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d)
+selfLoopRemoval d = IM.foldrWithKey tryVertex Nothing (_vertices d)
   where
-    tryVertex v = case IM.lookup v (_vertices d) of
-      Just (Boundary _) -> Nothing
-      Just _        -> do
+    tryVertex v (Boundary _) acc = acc
+    tryVertex v _ acc = case acc of
+      Just _ -> acc
+      Nothing -> do
         nb <- IM.lookup v (_neighborMap d)
         b <- M.lookup v nb
         if simpleCount b > 0
         then Just $ removeEdge v v Simple d
         else Nothing
-      Nothing -> Nothing
 
 piCommutation :: Rule
-piCommutation d = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d)
+piCommutation d = IM.foldrWithKey tryVertex Nothing (_vertices d)
   where
-    tryVertex v = case IM.lookup v (_vertices d) of
-      Just (Z p) | isPi p -> pushThrough v True
-      Just (X p) | isPi p -> pushThrough v False
-      _ -> Nothing
-
     isPi p = p == 1 % 1 || p == (-1) % 1
 
-    pushThrough v isZ = do
-      nb <- IM.lookup v (_neighborMap d)
-      let ns = M.toList nb
-      case ns of
-        [(a, ba), (b, bb)]
-          | a /= b
-          , simpleCount ba > 0 && hadamardCount ba == 0
-          , simpleCount bb > 0 && hadamardCount bb == 0 -> do
-              let (opposite, other) = if isOppositeColor a isZ then (a, b) else (b, a)
-              tOpp <- IM.lookup opposite (_vertices d)
-              nbOpp <- IM.lookup opposite (_neighborMap d)
-              if M.size nbOpp /= 2 then Nothing else
-                case (isZ, tOpp) of
-                  (True, X alpha) ->
-                    let d1 = removeVertex v d
-                        d2 = d1 { _vertices = IM.adjust (const (X (addPhase alpha (1 % 1)))) opposite (_vertices d1) }
-                        d3 = addEdge other opposite Simple d2
-                    in Just d3
-                  (False, Z alpha) ->
-                    let d1 = removeVertex v d
-                        d2 = d1 { _vertices = IM.adjust (const (Z (addPhase alpha (1 % 1)))) opposite (_vertices d1) }
-                        d3 = addEdge other opposite Simple d2
-                    in Just d3
-                  _ -> Nothing
-        _ -> Nothing
+    tryVertex v (Z p) acc | isPi p = tryPush acc v True
+    tryVertex v (X p) acc | isPi p = tryPush acc v False
+    tryVertex _ _ acc               = acc
+
+    tryPush acc v isZ = case acc of
+      Just _ -> acc
+      Nothing -> do
+        nb <- IM.lookup v (_neighborMap d)
+        let ns = M.toList nb
+        case ns of
+          [(a, ba), (b, bb)]
+            | a /= b
+            , simpleCount ba > 0 && hadamardCount ba == 0
+            , simpleCount bb > 0 && hadamardCount bb == 0 -> do
+                let (opposite, other) = if isOppositeColor a isZ then (a, b) else (b, a)
+                tOpp <- IM.lookup opposite (_vertices d)
+                nbOpp <- IM.lookup opposite (_neighborMap d)
+                if M.size nbOpp /= 2 then Nothing else
+                  case (isZ, tOpp) of
+                    (True, X alpha) ->
+                      let d1 = removeVertex v d
+                          d2 = d1 { _vertices = IM.adjust (const (X (addPhase alpha (1 % 1)))) opposite (_vertices d1) }
+                          d3 = addEdge other opposite Simple d2
+                      in Just d3
+                    (False, Z alpha) ->
+                      let d1 = removeVertex v d
+                          d2 = d1 { _vertices = IM.adjust (const (Z (addPhase alpha (1 % 1)))) opposite (_vertices d1) }
+                          d3 = addEdge other opposite Simple d2
+                      in Just d3
+                    _ -> Nothing
+          _ -> Nothing
 
     isOppositeColor w True  = case IM.lookup w (_vertices d) of Just (X _) -> True; _ -> False
     isOppositeColor w False = case IM.lookup w (_vertices d) of Just (Z _) -> True; _ -> False
 
 stateCopy :: Rule
-stateCopy d = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d)
+stateCopy d = IM.foldrWithKey tryVertex Nothing (_vertices d)
   where
-    tryVertex v = case IM.lookup v (_vertices d) of
-      Just (Z 0) | degree v d == 1 -> do
+    isPi p = p == 1 % 1 || p == (-1) % 1
+
+    tryVertex v (Z 0) acc | degree v d == 1 = tryRemoveZ acc v
+    tryVertex v (Z p) acc | isPi p && degree v d == 1 = tryRemoveZPi acc v p
+    tryVertex v (X 0) acc | degree v d == 1 = tryRemoveX acc v
+    tryVertex v (X p) acc | isPi p && degree v d == 1 = tryRemoveXPi acc v p
+    tryVertex _ _ acc = acc
+
+    tryRemoveZ acc v = case acc of
+      Just _ -> acc
+      Nothing -> do
         [w] <- Just (neighbors v d)
         case IM.lookup w (_vertices d) of
           Just (X _) -> Just (removeVertex v d)
           _ -> Nothing
-      Just (Z p) | isPi p && degree v d == 1 -> do
+
+    tryRemoveZPi acc v p = case acc of
+      Just _ -> acc
+      Nothing -> do
         [w] <- Just (neighbors v d)
         case IM.lookup w (_vertices d) of
           Just (X alpha) ->
@@ -199,12 +215,18 @@ stateCopy d = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d)
                 d2 = d1 { _vertices = IM.adjust (const (X (addPhase alpha p))) w (_vertices d1) }
             in Just d2
           _ -> Nothing
-      Just (X 0) | degree v d == 1 -> do
+
+    tryRemoveX acc v = case acc of
+      Just _ -> acc
+      Nothing -> do
         [w] <- Just (neighbors v d)
         case IM.lookup w (_vertices d) of
           Just (Z _) -> Just (removeVertex v d)
           _ -> Nothing
-      Just (X p) | isPi p && degree v d == 1 -> do
+
+    tryRemoveXPi acc v p = case acc of
+      Just _ -> acc
+      Nothing -> do
         [w] <- Just (neighbors v d)
         case IM.lookup w (_vertices d) of
           Just (Z alpha) ->
@@ -212,8 +234,6 @@ stateCopy d = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d)
                 d2 = d1 { _vertices = IM.adjust (const (Z (addPhase alpha p))) w (_vertices d1) }
             in Just d2
           _ -> Nothing
-      _ -> Nothing
-    isPi p = p == 1 % 1 || p == (-1) % 1
 
 -- | Combined π-copy rule: tries both state copy and π-commutation.
 --
