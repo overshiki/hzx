@@ -33,10 +33,13 @@ library
         HZX.LatticeSurgery.Protocols.CNOT
         HZX.LatticeSurgery.Protocols.TGate
         HZX.IO.QASM
+        HZX.IO.STIM
     build-depends:
         base ^>=4.18.3.0,
         containers ^>=0.6.7,
-        parsec ^>=3.1.16
+        parsec ^>=3.1.16,
+        megaparsec >=8.0.0 && <10,
+        stim-parser ^>=0.2.0.0
     hs-source-dirs:   src
     default-language: Haskell2010
 
@@ -57,6 +60,7 @@ test-suite hzx-test
         Test.Core
         Test.Rewrite
         Test.RoundTrip
+        Test.STIM
     build-depends:
         base ^>=4.18.3.0,
         containers ^>=0.6.7,

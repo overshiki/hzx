@@ -193,3 +193,5 @@ serializeGate (XPhase q p) = "rx(" ++ show (fromRational p :: Double) ++ "*pi) q
 serializeGate (CNOT c t)  = "cx q[" ++ show c ++ "], q[" ++ show t ++ "];"
 serializeGate (CZ q1 q2)  = "cz q[" ++ show q1 ++ "], q[" ++ show q2 ++ "];"
 serializeGate (SWAP q1 q2) = "swap q[" ++ show q1 ++ "], q[" ++ show q2 ++ "];"
+serializeGate (Measure _ q) = "// measure q[" ++ show q ++ "] (not supported in OpenQASM 2.0);"
+serializeGate (Reset _ q)  = "// reset q[" ++ show q ++ "] (not supported in OpenQASM 2.0);"
