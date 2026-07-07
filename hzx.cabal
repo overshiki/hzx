@@ -21,6 +21,7 @@ library
         HZX.Core.Phase
         HZX.Core.Scalar
         HZX.Circuit
+        HZX.Circuit.Parametric
         HZX.Circuit.ToDiagram
         HZX.Circuit.FromDiagram
         HZX.Rewrite.Rule
@@ -34,6 +35,23 @@ library
         HZX.LatticeSurgery.Protocols.TGate
         HZX.IO.QASM
         HZX.IO.STIM
+        HZX.Core.Diagram.Parametric.Types
+        HZX.Core.Diagram.Parametric.Phase
+        HZX.Core.Diagram.Parametric.Scalar
+        HZX.Core.Diagram.Parametric.Instances
+        HZX.Core.Diagram.Parametric.Rewrite
+        HZX.Core.Diagram.Parametric.Strategy
+        HZX.Circuit.ToParametricDiagram
+        HZX.IO.STIM.Parametric
+        HZX.Core.Diagram.Doubled.Types
+        HZX.Core.Diagram.Doubled.Instances
+        HZX.Core.Diagram.Doubled.Rewrite
+        HZX.Core.Diagram.Doubled.Strategy
+        HZX.Core.Diagram.Doubled.Components
+        HZX.Circuit.ToDoubledDiagram
+        HZX.Verification.Tensor
+        HZX.Verification.Evaluate
+        HZX.IO.STIM.Doubled
     build-depends:
         base ^>=4.18.3.0,
         containers ^>=0.6.7,
@@ -60,7 +78,11 @@ test-suite hzx-test
         Test.Core
         Test.Rewrite
         Test.RoundTrip
+        Test.LatticeSurgery
         Test.STIM
+        Test.Parametric
+        Test.Doubled
+        Test.Verification
     build-depends:
         base ^>=4.18.3.0,
         containers ^>=0.6.7,

@@ -5,182 +5,184 @@ module HZX.Circuit.FromDiagram
   ) where
 
 import qualified Data.IntMap as IM
+import qualified Data.IntSet as IS
 import qualified Data.Map as M
-import Data.List (foldl', nub)
-import Data.Maybe (fromMaybe, mapMaybe, listToMaybe, catMaybes)
-import Data.Ratio ((%))
+import Data.List (sort)
+import Data.Maybe (fromMaybe)
 
 import HZX.Core.Diagram
-import HZX.Core.Phase
 import HZX.Circuit
-import HZX.LinAlg.Z2
 
 -- | Extract a quantum circuit from a ZX-diagram.
---   Stage 1 implementation: handles simple cases, returns empty for complex diagrams.
+--
+--   Stage 2: reverse converter.  It assumes the diagram has the circuit-like
+--   form produced by 'circuitToDiagram' (or a simplification that keeps wires
+--   intact): each input boundary traces through a linear wire, interrupted only
+--   by single-qubit gates and by simple edges that encode CNOT / CZ.
+--
+--   Supported gates: H, S, T, ZPhase, XPhase, CNOT, CZ.  SWAP is decomposed
+--   into three CNOTs by 'circuitToDiagram' and is not reconstructed as a SWAP
+--   gate.  Measurement and reset operations are not recovered as gates.
 diagramToCircuit :: Diagram -> Circuit
-diagramToCircuit d =
-  -- First, convert to graph-like form
-  let d' = toGraphLike d
-  in extractSimple d'
-
--- | Convert a diagram to graph-like form:
---   All interior spiders are Z-spiders, all interior edges are Hadamard edges.
-toGraphLike :: Diagram -> Diagram
-toGraphLike d =
-  let d1 = runStrategy hadamardEdgeSimp d
-      d2 = runStrategy colorChangeAll d1
-      d3 = runStrategy spiderFusionAll d2
-  in d3
+diagramToCircuit d = Circuit (go verts IS.empty)
   where
-    runStrategy f d0 =
-      case f d0 of
-        Nothing -> d0
-        Just d' -> runStrategy f d'
-    
-    hadamardEdgeSimp d0 = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d0)
-      where
-        tryVertex v = case IM.lookup v (_vertices d0) of
-          Just HBox -> do
-            nb <- IM.lookup v (_neighborMap d0)
-            let ns = M.toList nb
-            case ns of
-              [(a, _), (b, _)] | a /= b ->
-                let d1 = removeVertex v d0
-                    d2 = addEdge a b Hadamard d1
-                in Just d2
-              _ -> Nothing
-          _ -> Nothing
-    
-    colorChangeAll d0 = listToMaybe $ mapMaybe tryVertex $ IM.keys (_vertices d0)
-      where
-        tryVertex v = case IM.lookup v (_vertices d0) of
-          Just (X p) -> Just (flipColor v p d0)
-          _ -> Nothing
-        
-        flipColor v p dOrig =
-          let nb = neighborBundles v dOrig
-              d1 = dOrig { _vertices = IM.adjust (const (Z p)) v (_vertices dOrig) }
-              step acc (w, bndl) =
-                let sCount = simpleCount bndl
-                    hCount = hadamardCount bndl
-                    acc1 = removeEdgeBundle v w acc
-                    acc2 = foldl (\a _ -> addEdge v w Hadamard a) acc1 [1..sCount]
-                    acc3 = foldl (\a _ -> addEdge v w Simple a) acc2 [1..hCount]
-                in acc3
-          in foldl step d1 (M.toList nb)
-    
-    spiderFusionAll d0 = listToMaybe $ mapMaybe tryPair pairs
-      where
-        vs = IM.keys (_vertices d0)
-        pairs = [(v1, v2) | v1 <- vs, v2 <- vs, v1 < v2]
-        
-        tryPair (v1, v2) = do
-          t1 <- IM.lookup v1 (_vertices d0)
-          t2 <- IM.lookup v2 (_vertices d0)
-          case (t1, t2) of
-            (Z p1, Z p2) -> fuse v1 v2 p1 p2 d0
-            _ -> Nothing
-        
-        fuse v1 v2 p1 p2 dOrig = do
-          nb <- IM.lookup v1 (_neighborMap dOrig)
-          if not (M.member v2 nb) then Nothing else do
-            let v2Nbs = neighborBundles v2 dOrig
-                dWithoutV2 = removeVertex v2 dOrig
-                redirect acc (w, bndl) =
-                  if w == v1 then acc else mergeEdges v1 w bndl acc
-                dRedirected = foldl redirect dWithoutV2 (M.toList v2Nbs)
-                dFinal = dRedirected { _vertices = IM.adjust (const (Z (addPhase p1 p2))) v1 (_vertices dRedirected) }
-            return dFinal
+    qOf v = IM.lookup v (vertexToQubitMap d)
+    verts = sort (filter (not . isBdr d) (allVertices d))
+    go [] _ = []
+    go (v:vs) seen
+      | v `IS.member` seen = go vs seen
+      | otherwise =
+          case vertexType d v of
+            Nothing -> go vs seen
+            Just HBox ->
+              case qOf v of
+                Nothing -> go vs (IS.insert v seen)
+                Just q  -> H q : go vs (IS.insert v seen)
+            Just (Z p) ->
+              case twoQubitPartner d v of
+                Nothing ->
+                  if degree v d <= 2
+                  then case qOf v of
+                         Nothing -> go vs (IS.insert v seen)
+                         Just q  -> if p == 0
+                                    then go vs (IS.insert v seen)
+                                    else ZPhase q p : go vs (IS.insert v seen)
+                  else go vs (IS.insert v seen)
+                Just (w, CNOTControl) ->
+                  case (qOf v, qOf w) of
+                    (Just qv, Just qw) -> CNOT qv qw : go vs (IS.insert v (IS.insert w seen))
+                    _                  -> go vs (IS.insert v seen)
+                Just (w, CZPartner) ->
+                  case (qOf v, qOf w) of
+                    (Just qv, Just qw) -> CZ qv qw : go vs (IS.insert v (IS.insert w seen))
+                    _                  -> go vs (IS.insert v seen)
+                Just (_, CNOTTarget) ->
+                  -- A Z spider is never the target of a CNOT.
+                  go vs (IS.insert v seen)
+            Just (X p) ->
+              case twoQubitPartner d v of
+                Nothing ->
+                  if degree v d <= 2
+                  then case qOf v of
+                         Nothing -> go vs (IS.insert v seen)
+                         Just q  -> if p == 0
+                                    then go vs (IS.insert v seen)
+                                    else XPhase q p : go vs (IS.insert v seen)
+                  else go vs (IS.insert v seen)
+                Just (w, CNOTTarget) ->
+                  -- The control spider should have emitted the CNOT already.
+                  go vs (IS.insert v (IS.insert w seen))
+                Just (_, _) ->
+                  go vs (IS.insert v seen)
+            Just (Boundary _) -> go vs seen
 
--- | Extract a circuit from a graph-like diagram.
---   Stage 1: Simple extraction that handles basic cases.
-extractSimple :: Diagram -> Circuit
-extractSimple d =
-  let -- Get all Z spiders and their phases
-      zSpiders = [(v, p) | (v, Z p) <- IM.toList (_vertices d)]
-      -- Get boundary information
-      inBdrs = inputs d
-      outBdrs = outputs d
-      n = max (length inBdrs) (length outBdrs)
-      
-      -- Build a mapping from spider to which "qubit line" it belongs to
-      -- by tracing from inputs
-      spiderToQubit = IM.fromList $ catMaybes $ map (\(idx, bv) -> 
-        case traceToSpider bv d of
-          Just v -> Just (v, idx)
-          Nothing -> Nothing) (zip [0..] inBdrs)
-      
-      -- Extract single-qubit gates from spiders
-      singleQubitGates = concatMap (extractSingleQubit spiderToQubit d) zSpiders
-      
-      -- Extract CNOTs from connectivity
-      cnotGates = extractCNOTs d spiderToQubit
-      
-      allGates = sortGates (singleQubitGates ++ cnotGates)
-  in Circuit allGates
+data TwoQubitRole = CNOTControl | CNOTTarget | CZPartner deriving (Eq, Show)
+
+-- | If @v@ is one endpoint of a two-qubit gate, return its partner and role.
+twoQubitPartner :: Diagram -> Vertex -> Maybe (Vertex, TwoQubitRole)
+twoQubitPartner d v =
+  case vertexType d v of
+    Just (Z _) ->
+      -- Look for an X(0) neighbor: this is a CNOT target.
+      let xNeighbors = [ w | w <- neighbors v d
+                          , isX0 d w
+                          , isJointEdge d v w ]
+      in case xNeighbors of
+           (w:_) -> Just (w, CNOTControl)
+           _ ->
+             -- Otherwise look for another Z(0) neighbor: this is a CZ.
+             let zNeighbors = [ w | w <- neighbors v d
+                                   , w /= v
+                                   , isZ0 d w
+                                   , isJointEdge d v w ]
+             in case zNeighbors of
+                  (w:_) -> Just (w, CZPartner)
+                  _     -> Nothing
+    Just (X _) ->
+      let zNeighbors = [ w | w <- neighbors v d
+                          , isZ0 d w
+                          , isJointEdge d v w ]
+      in case zNeighbors of
+           (w:_) -> Just (w, CNOTTarget)
+           _     -> Nothing
+    _ -> Nothing
+
+isBdr :: Diagram -> Vertex -> Bool
+isBdr d v = case vertexType d v of
+  Just (Boundary _) -> True
+  _                 -> False
+
+isZ0 :: Diagram -> Vertex -> Bool
+isZ0 d v = case vertexType d v of
+  Just (Z p) -> p == 0
+  _          -> False
+
+isX0 :: Diagram -> Vertex -> Bool
+isX0 d v = case vertexType d v of
+  Just (X p) -> p == 0
+  _          -> False
+
+-- | A "joint" simple edge connects two internal spiders that belong to
+--   different qubit wires.  In circuit-like diagrams these are exactly the
+--   edges that encode CNOT (Z--X) and CZ (Z--Z).
+isJointEdge :: Diagram -> Vertex -> Vertex -> Bool
+isJointEdge d a b
+  | isBdr d a || isBdr d b = False
+  | otherwise =
+      case M.lookup (normalizeEdge a b) (_edges d) of
+        Just bundle -> simpleCount bundle > 0 && degree a d >= 3 && degree b d >= 3
+        Nothing     -> False
+
+-- | Map every internal vertex to the qubit index of the wire it lives on.
+--   Joint edges are temporarily removed so that each remaining connected
+--   component is a single wire.
+vertexToQubitMap :: Diagram -> IM.IntMap Int
+vertexToQubitMap d = mapping
   where
-    -- Trace from a boundary to find the connected spider
-    traceToSpider :: Vertex -> Diagram -> Maybe Vertex
-    traceToSpider v d0 =
-      case neighbors v d0 of
-        [] -> Nothing
-        [w] -> case IM.lookup w (_vertices d0) of
-                 Just (Boundary _) -> Nothing
-                 Just (Z _) -> Just w
-                 _ -> traceToSpider w d0
-        _ -> Nothing  -- Branching
-    
-    -- Extract single-qubit gates from a Z spider
-    extractSingleQubit :: IM.IntMap Int -> Diagram -> (Vertex, Rational) -> [Gate]
-    extractSingleQubit qubitMap d0 (v, p) =
-      case IM.lookup v qubitMap of
-        Just q -> 
-          let gates = []
-              -- Add Z rotation if phase is non-zero
-              gates' = if p /= 0 then ZPhase q p : gates else gates
-              -- Check if connected via Hadamard (would indicate H gates)
-              gates'' = checkHadamards d0 v q gates'
-          in gates''
-        Nothing -> []
-    
-    -- Check if spider has Hadamard connections that indicate H gates
-    checkHadamards :: Diagram -> Vertex -> Int -> [Gate] -> [Gate]
-    checkHadamards d0 v q acc =
-      let nbs = neighborBundles v d0
-          -- Count Hadamard edges
-          hCount = sum [hadamardCount b | (_, b) <- M.toList nbs]
-      in if hCount > 0
-         then H q : acc  -- Simplified: add H if any Hadamard edges
-         else acc
-    
-    -- Extract CNOT gates from spider connectivity
-    extractCNOTs :: Diagram -> IM.IntMap Int -> [Gate]
-    extractCNOTs d0 qubitMap =
-      -- Look for pairs of connected Z-spiders that form CNOT patterns
-      let zSpiders = [v | (v, Z _) <- IM.toList (_vertices d0)]
-          pairs = [(v1, v2) | v1 <- zSpiders, v2 <- zSpiders, v1 < v2]
-      in concatMap (tryExtractCNOT d0 qubitMap) pairs
-    
-    tryExtractCNOT :: Diagram -> IM.IntMap Int -> (Vertex, Vertex) -> [Gate]
-    tryExtractCNOT d0 qubitMap (v1, v2) =
-      case (IM.lookup v1 qubitMap, IM.lookup v2 qubitMap) of
-        (Just q1, Just q2) | q1 /= q2 ->
-          -- Check if there's a Hadamard edge between them (CZ pattern)
-          -- or if they share a common X neighbor (CNOT pattern)
-          if hasHadamardEdge d0 v1 v2
-          then [CZ q1 q2]  -- Or could be CNOT depending on context
-          else []
-        _ -> []
-    
-    hasHadamardEdge :: Diagram -> Vertex -> Vertex -> Bool
-    hasHadamardEdge d0 v1 v2 =
-      let k = normalizeEdge v1 v2
-      in case M.lookup k (_edges d0) of
-           Just b -> hadamardCount b > 0
-           Nothing -> False
-    
-    -- Simple topological sort of gates (placeholder for Stage 1)
-    sortGates :: [Gate] -> [Gate]
-    sortGates = id  -- In full implementation, would sort by dependency
+    inputMap = IM.fromList (zip (inputs d) [0 :: Int ..])
+    outputMap = IM.fromList (zip (outputs d) [0 :: Int ..])  -- fallback only
 
+    -- Build adjacency of non-joint simple edges.
+    addEdgeAdj a b m = IM.insertWith (++) a [b] $ IM.insertWith (++) b [a] m
+    adj0 = M.foldrWithKey addBundle IM.empty (_edges d)
+    addBundle (a, b) bundle acc =
+      if simpleCount bundle > 0 && not (isJointEdge d a b)
+      then addEdgeAdj a b acc
+      else acc
 
+    -- Connected components of the reduced graph.
+    comps = components adj0
+
+    qubitOfComponent comp =
+      let inputsHere  = [ q | v <- comp, Just q <- [IM.lookup v inputMap] ]
+          outputsHere = [ q | v <- comp, Just q <- [IM.lookup v outputMap] ]
+      in case inputsHere of
+           (q:_) -> q
+           _     -> case outputsHere of
+                      (q:_) -> q
+                      _     -> 0
+
+    mapping = IM.fromList
+      [ (v, q)
+      | comp <- comps
+      , let q = qubitOfComponent comp
+      , v <- comp
+      ]
+
+-- | Connected components of an undirected graph represented as an adjacency map.
+components :: IM.IntMap [Vertex] -> [[Vertex]]
+components adj = go (IM.keys adj) IS.empty
+  where
+    go [] _ = []
+    go (v:vs) seen
+      | v `IS.member` seen = go vs seen
+      | otherwise =
+          let comp = dfs [v] IS.empty
+          in IS.toList comp : go vs (IS.union comp seen)
+
+    dfs [] visited = visited
+    dfs (x:xs) visited
+      | x `IS.member` visited = dfs xs visited
+      | otherwise =
+          let nbrs = fromMaybe [] (IM.lookup x adj)
+          in dfs (nbrs ++ xs) (IS.insert x visited)

@@ -55,9 +55,10 @@ spiderFusion d = listToMaybe $ mapMaybe tryPair pairs
         (X p1, X p2) -> fuse v1 v2 p1 p2 X
         _            -> Nothing
 
-    fuse v1 v2 p1 p2 mk = do 
+    fuse v1 v2 p1 p2 mk = do
       nb <- IM.lookup v1 (_neighborMap d)
-      if not (M.member v2 nb) then Nothing else do
+      bundle <- M.lookup v2 nb
+      if simpleCount bundle == 0 || hadamardCount bundle > 0 then Nothing else do
         let v2Nbs = neighborBundles v2 d
             dWithoutV2 = removeVertex v2 d
             redirect acc (w, bndl) =

@@ -10,6 +10,9 @@ import Test.Rewrite
 import Test.RoundTrip
 import Test.LatticeSurgery
 import Test.STIM
+import Test.Parametric
+import Test.Doubled
+import Test.Verification
 
 main :: IO ()
 main = defaultMain tests
@@ -21,4 +24,7 @@ tests = testGroup "HZX Tests"
   , roundTripTests
   , latticeSurgeryTests
   , stimTests
+  , parametricTests
+  , doubledTests
+  , verificationTests
   ]
