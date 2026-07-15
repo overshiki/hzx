@@ -16,15 +16,13 @@ import HZX.Core.Diagram.Parametric.Rewrite
   , pHopfRule, pSelfLoopRemoval, pPiCopy, pBialgebraSimp
   , pLocalComplementation, pPivot
   )
+import HZX.Rewrite.Generic (fixpoint)
 
 type ParamStrategy = ParamDiagram -> ParamDiagram
 
 -- | Repeatedly apply a parametric rule until it no longer applies.
 pRunStrategy :: ParamRule -> ParamStrategy
-pRunStrategy r d =
-  case r d of
-    Nothing  -> d
-    Just d'  -> pRunStrategy r d'
+pRunStrategy = fixpoint
 
 -- | Spider fusion followed by self-loop removal.
 pSpiderSimp :: ParamStrategy

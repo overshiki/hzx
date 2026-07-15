@@ -3,16 +3,21 @@ module Test.Doubled (doubledTests) where
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Data.Ratio ((%))
 import qualified Data.Map as M
 
 import HZX.Core.Diagram.Types (BoundaryType(..))
-import HZX.Core.Diagram.Parametric.Types (ParamPhase(..))
+import HZX.Core.Diagram.Parametric.Types (ParamPhase(..), ParamScalar(..))
 import HZX.Core.Diagram.Doubled.Types
 import HZX.Core.Diagram.Doubled.Instances
 import HZX.Core.Diagram.Doubled.Rewrite
 import HZX.Core.Diagram.Doubled.Strategy
 import HZX.Core.Diagram.Doubled.Components
+import HZX.Core.Diagram.Doubled.Parametric
+  ( instantiateDoubledDiagram
+  , evalDoubledScalar
+  , parametricCircuitToDoubledDiagram
+  )
+import qualified HZX.Core.Scalar as S
 import HZX.Circuit (Gate(..), MeasurementBasis(..))
 import HZX.Circuit.Parametric (ParametricCircuit(..), ParametricOp(..), NoiseChannel(..))
 import HZX.Circuit.ToDoubledDiagram (circuitToDoubledDiagram)
@@ -26,6 +31,7 @@ doubledTests = testGroup "Doubled ZX"
   , classicalRuleTests
   , componentTests
   , rewriteTests
+  , parametricInstantiationTests
   ]
 
 -- ---------------------------------------------------------------------------
@@ -253,6 +259,50 @@ componentTests = testGroup "Components"
           case comps of
             [c] -> dIsDetectorComponent d c @? "Expected a detector component"
             _   -> assertFailure "Expected exactly one classical component"
+  ]
+
+-- ---------------------------------------------------------------------------
+-- Parametric instantiation tests
+-- ---------------------------------------------------------------------------
+
+parametricInstantiationTests :: TestTree
+parametricInstantiationTests = testGroup "Parametric Instantiation"
+  [ testCase "X_ERROR parameter set to True" $ do
+      let pc = ParametricCircuit
+            [ PONoise (XError "e0" 0 0.01)
+            , POGate (H 0)
+            , POGate (Measure ZBasis 0)
+            ]
+          d = parametricCircuitToDoubledDiagram pc
+          d' = instantiateDoubledDiagram (M.singleton "e0" True) d
+          dxPhases =
+            [ c | v <- dAllVertices d'
+                , Just (DX (ParamPhase c ps)) <- [dLookupVertex v d']
+                , M.null ps
+                ]
+      not (null dxPhases) @? "Expected a concrete DX spider"
+      dxPhases @?= [1]
+
+  , testCase "X_ERROR parameter set to False" $ do
+      let pc = ParametricCircuit
+            [ PONoise (XError "e0" 0 0.01)
+            , POGate (H 0)
+            , POGate (Measure ZBasis 0)
+            ]
+          d = parametricCircuitToDoubledDiagram pc
+          d' = instantiateDoubledDiagram (M.singleton "e0" False) d
+          dxPhases =
+            [ c | v <- dAllVertices d'
+                , Just (DX (ParamPhase c ps)) <- [dLookupVertex v d']
+                , M.null ps
+                ]
+      not (null dxPhases) @? "Expected a concrete DX spider"
+      dxPhases @?= [0]
+
+  , testCase "Evaluate doubled scalar under assignment" $ do
+      let d = dEmpty { _dScalar = ParamScalar 2 (ParamPhase 0 (M.singleton "e" 1)) }
+      evalDoubledScalar (M.singleton "e" True)  d @?= S.Scalar 2 1
+      evalDoubledScalar (M.singleton "e" False) d @?= S.Scalar 2 0
   ]
 
 -- ---------------------------------------------------------------------------

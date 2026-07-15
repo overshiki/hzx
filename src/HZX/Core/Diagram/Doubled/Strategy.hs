@@ -10,14 +10,12 @@ import HZX.Core.Diagram.Doubled.Rewrite
   ( DoubledRule, dSpiderFusion, dHadamardEdgeSimp
   , dCopyIdentity, dXorIdentity, dCopyFusion, dXorFusion, dMeasureCopy
   )
+import HZX.Rewrite.Generic (fixpoint)
 
 type DoubledStrategy = DoubledDiagram -> DoubledDiagram
 
 dRunStrategy :: DoubledRule -> DoubledStrategy
-dRunStrategy r d =
-  case r d of
-    Nothing  -> d
-    Just d'  -> dRunStrategy r d'
+dRunStrategy = fixpoint
 
 dBasicSimp :: DoubledStrategy
 dBasicSimp = dRunStrategy basicRule

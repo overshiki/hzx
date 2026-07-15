@@ -17,6 +17,7 @@ rewriteTests :: TestTree
 rewriteTests = testGroup "Rewrite Tests"
   [ spiderFusionTests
   , identityRemovalTests
+  , searchCombinatorTests
   , basicSimpTests
   , cliffordTests
   ]
@@ -87,6 +88,29 @@ identityRemovalTests = testGroup "Identity Removal"
           d5 = addEdge mid outB Simple d4
           result = identityRemoval d5
       result @?= Nothing
+  ]
+
+-- | Test that the search combinators preserve deterministic order.
+searchCombinatorTests :: TestTree
+searchCombinatorTests = testGroup "Search Combinators"
+  [ testCase "vertexRule visits vertices in ascending order" $ do
+      -- Two H-boxes; the lower-index one should be simplified first.
+      let (h1, d1) = allocVertex HBox empty
+          (h2, d2) = allocVertex HBox d1
+          (a,  d3) = allocVertex (Boundary Rough) d2
+          (b,  d4) = allocVertex (Boundary Rough) d3
+          (c,  d5) = allocVertex (Boundary Rough) d4
+          (d,  d6) = allocVertex (Boundary Rough) d5
+          d7 = addEdge a h1 Simple d6
+          d8 = addEdge h1 b Simple d7
+          d9 = addEdge c h2 Simple d8
+          d10 = addEdge h2 d Simple d9
+          result = hadamardEdgeSimp d10
+      case result of
+        Nothing -> assertFailure "Should match an H-box"
+        Just d' -> do
+          IM.member h1 (_vertices d') @?= False
+          IM.member h2 (_vertices d') @?= True
   ]
 
 -- | Test color change rule

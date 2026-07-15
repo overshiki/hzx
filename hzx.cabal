@@ -25,6 +25,8 @@ library
         HZX.Circuit.ToDiagram
         HZX.Circuit.FromDiagram
         HZX.Rewrite.Rule
+        HZX.Rewrite.Generic
+        HZX.Rewrite.Search
         HZX.Rewrite.Strategy
         HZX.Rewrite.Matcher
         HZX.LinAlg.Z2
@@ -39,15 +41,18 @@ library
         HZX.Core.Diagram.Parametric.Phase
         HZX.Core.Diagram.Parametric.Scalar
         HZX.Core.Diagram.Parametric.Instances
+        HZX.Core.Diagram.Parametric.Search
         HZX.Core.Diagram.Parametric.Rewrite
         HZX.Core.Diagram.Parametric.Strategy
         HZX.Circuit.ToParametricDiagram
         HZX.IO.STIM.Parametric
         HZX.Core.Diagram.Doubled.Types
         HZX.Core.Diagram.Doubled.Instances
+        HZX.Core.Diagram.Doubled.Search
         HZX.Core.Diagram.Doubled.Rewrite
         HZX.Core.Diagram.Doubled.Strategy
         HZX.Core.Diagram.Doubled.Components
+        HZX.Core.Diagram.Doubled.Parametric
         HZX.Circuit.ToDoubledDiagram
         HZX.Verification.Tensor
         HZX.Verification.Evaluate

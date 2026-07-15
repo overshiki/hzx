@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module HZX.Core.Diagram.Instances
@@ -27,6 +28,7 @@ import Data.Maybe (fromMaybe, isJust)
 import HZX.Core.Diagram.Class
 import HZX.Core.Diagram.Types
 import HZX.Core.Scalar
+import HZX.Rewrite.Generic (Rewritable(..))
 
 -- | Concrete ZX diagram implementation with underscore-prefixed fields.
 --
@@ -106,6 +108,14 @@ instance Diagrammatic Diagram where
   outputs = _outputs
   scalar = _scalar
   mapScalar f d = d { _scalar = f (_scalar d) }
+
+-- | Concrete diagrams are rewritable using the generic combinators.
+instance Rewritable Diagram where
+  type RVertex Diagram = VertexType
+  type REdge Diagram = EdgeBundle
+  rAllVertices = IM.keys . _vertices
+  rLookupVertex v d = IM.lookup v (_vertices d)
+  rAllEdges d = M.toList (_edges d)
 
 -- | Empty diagram.
 empty :: Diagram

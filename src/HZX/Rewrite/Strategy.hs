@@ -10,15 +10,13 @@ module HZX.Rewrite.Strategy
 
 import HZX.Core.Diagram
 import HZX.Rewrite.Rule
+import HZX.Rewrite.Generic (fixpoint)
 
 type Strategy = Diagram -> Diagram
 
 -- | Repeatedly apply a rule until it no longer applies.
 runStrategy :: Rule -> Strategy
-runStrategy r d =
-  case r d of
-    Nothing  -> d
-    Just d'  -> runStrategy r d'
+runStrategy = fixpoint
 
 -- | Spider fusion followed by self-loop removal.
 spiderSimp :: Strategy

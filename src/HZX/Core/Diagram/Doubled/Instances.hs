@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Concrete implementation of doubled ZX diagrams and their operations.
@@ -33,16 +34,25 @@ import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import Data.Maybe (fromMaybe, isJust)
 
-import HZX.Core.Diagram.Types (Vertex, BoundaryType(..), EdgeKey, normalizeEdge)
+import HZX.Core.Diagram.Types (Vertex, normalizeEdge)
 import HZX.Core.Diagram.Doubled.Types
   ( DoubledDiagram(..), DoubledVertexType(..), DoubledEdgeType(..)
   , EdgeKind(..), DoubledEdgeBundle(..) )
-import HZX.Core.Diagram.Parametric.Types (ParamPhase(..))
+
 import HZX.Core.Diagram.Parametric.Scalar (paramScalarOne)
+import HZX.Rewrite.Generic (Rewritable(..))
 
 -- | Empty doubled diagram.
 dEmpty :: DoubledDiagram
 dEmpty = DoubledDiagram IM.empty M.empty M.empty IM.empty IM.empty [] [] [] [] 0 paramScalarOne
+
+-- | Doubled diagrams are rewritable using the generic combinators.
+instance Rewritable DoubledDiagram where
+  type RVertex DoubledDiagram = DoubledVertexType
+  type REdge DoubledDiagram = DoubledEdgeBundle
+  rAllVertices = dAllVertices
+  rLookupVertex = dLookupVertex
+  rAllEdges d = M.toList (_qEdges d) ++ M.toList (_cEdges d)
 
 -- | Allocate a single vertex.
 dAllocVertex :: DoubledVertexType -> DoubledDiagram -> (Vertex, DoubledDiagram)

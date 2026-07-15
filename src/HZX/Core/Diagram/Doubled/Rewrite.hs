@@ -18,12 +18,13 @@ module HZX.Core.Diagram.Doubled.Rewrite
 
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
-import Data.Maybe (listToMaybe, mapMaybe)
+
 import HZX.Core.Diagram.Doubled.Types
   ( DoubledDiagram(..), DoubledVertexType(..), DoubledEdgeType(..)
   , DoubledEdgeBundle(..), EdgeKind(..) )
 import HZX.Core.Diagram.Doubled.Instances
   ( dLookupVertex, dAllVertices, dRemoveVertex, dMergeEdges, dAddEdge )
+import HZX.Core.Diagram.Doubled.Search
 import HZX.Core.Diagram.Parametric.Phase (addParamPhase)
 
 type DoubledRule = DoubledDiagram -> Maybe DoubledDiagram
@@ -34,20 +35,17 @@ type DoubledRule = DoubledDiagram -> Maybe DoubledDiagram
 
 -- | Fuse adjacent doubled Z/Z or X/X spiders connected by a quantum edge.
 dSpiderFusion :: DoubledRule
-dSpiderFusion d = listToMaybe $ mapMaybe tryPair pairs
+dSpiderFusion = dPairRule tryPair
   where
-    vs = dAllVertices d
-    pairs = [(v1, v2) | v1 <- vs, v2 <- vs, v1 < v2]
-
-    tryPair (v1, v2) = do
+    tryPair v1 v2 d = do
       t1 <- dLookupVertex v1 d
       t2 <- dLookupVertex v2 d
       case (t1, t2) of
-        (DZ p1, DZ p2) -> fuse v1 v2 p1 p2 DZ
-        (DX p1, DX p2) -> fuse v1 v2 p1 p2 DX
+        (DZ p1, DZ p2) -> fuse v1 v2 p1 p2 DZ d
+        (DX p1, DX p2) -> fuse v1 v2 p1 p2 DX d
         _              -> Nothing
 
-    fuse v1 v2 p1 p2 mk = do
+    fuse v1 v2 p1 p2 mk d = do
       nb <- IM.lookup v1 (_qNeighborMap d)
       if not (M.member v2 nb) then Nothing else do
         let v2Nbs = IM.findWithDefault M.empty v2 (_qNeighborMap d)
@@ -67,20 +65,18 @@ dSpiderFusion d = listToMaybe $ mapMaybe tryPair pairs
 -- | Remove a doubled H-box of quantum degree 2 and replace it with a
 --   Hadamard edge.
 dHadamardEdgeSimp :: DoubledRule
-dHadamardEdgeSimp d = IM.foldrWithKey tryVertex Nothing (_dVertices d)
+dHadamardEdgeSimp = dVertexRule tryVertex
   where
-    tryVertex v DHBox acc = case acc of
-      Just _  -> acc
-      Nothing -> do
-        nb <- IM.lookup v (_qNeighborMap d)
-        let ns = M.toList nb
-        case ns of
-          [(a, _), (b, _)] | a /= b ->
-            let d1 = dRemoveVertex v d
-                d2 = dAddEdge a b DHadamard d1
-            in Just d2
-          _ -> Nothing
-    tryVertex _ _ acc = acc
+    tryVertex v DHBox d = do
+      nb <- IM.lookup v (_qNeighborMap d)
+      let ns = M.toList nb
+      case ns of
+        [(a, _), (b, _)] | a /= b ->
+          let d1 = dRemoveVertex v d
+              d2 = dAddEdge a b DHadamard d1
+          in Just d2
+        _ -> Nothing
+    tryVertex _ _ _ = Nothing
 
 -- ---------------------------------------------------------------------------
 -- Classical identity removal
@@ -95,9 +91,11 @@ dXorIdentity :: DoubledRule
 dXorIdentity = classicalIdentity DXor
 
 classicalIdentity :: DoubledVertexType -> DoubledRule
-classicalIdentity ty d = listToMaybe $ mapMaybe tryVertex (dAllVertices d)
+classicalIdentity ty = dSearchRule candidates tryVertex
   where
-    tryVertex v = do
+    candidates = dAllVertices
+
+    tryVertex v d = do
       t <- dLookupVertex v d
       if t /= ty then Nothing else do
         nb <- IM.lookup v (_cNeighborMap d)
@@ -126,12 +124,9 @@ dXorFusion :: DoubledRule
 dXorFusion = classicalFusion DXor
 
 classicalFusion :: DoubledVertexType -> DoubledRule
-classicalFusion ty d = listToMaybe $ mapMaybe tryPair pairs
+classicalFusion ty = dPairRule tryPair
   where
-    vs = dAllVertices d
-    pairs = [(v1, v2) | v1 <- vs, v2 <- vs, v1 < v2]
-
-    tryPair (v1, v2) = do
+    tryPair v1 v2 d = do
       t1 <- dLookupVertex v1 d
       t2 <- dLookupVertex v2 d
       if t1 /= ty || t2 /= ty then Nothing else do
@@ -153,9 +148,9 @@ classicalFusion ty d = listToMaybe $ mapMaybe tryPair pairs
 --   the measurement directly to those outputs.  Copying a classical outcome at
 --   the diagram boundary is semantically free.
 dMeasureCopy :: DoubledRule
-dMeasureCopy d = listToMaybe $ mapMaybe tryMeasure (dAllVertices d)
+dMeasureCopy = dSearchRule dAllVertices tryMeasure
   where
-    tryMeasure m = do
+    tryMeasure m d = do
       mty <- dLookupVertex m d
       case mty of
         DMeasureZ -> Just ()
@@ -169,7 +164,7 @@ dMeasureCopy d = listToMaybe $ mapMaybe tryMeasure (dAllVertices d)
             cNb <- IM.lookup c (_cNeighborMap d)
             let outs = [ w | (w, bndl) <- M.toList cNb
                            , w /= m
-                           , isOutputBoundary w
+                           , isOutputBoundary d w
                            , isSingleClassical bndl ]
             if length outs /= M.size cNb - 1 then Nothing else do
               let d1 = dRemoveVertex c d
@@ -179,7 +174,7 @@ dMeasureCopy d = listToMaybe $ mapMaybe tryMeasure (dAllVertices d)
     isSingleClassical b =
       cSimpleCount b == 1 && qSimpleCount b == 0 && qHadamardCount b == 0
 
-    isOutputBoundary v =
+    isOutputBoundary d v =
       v `elem` _dClassicalOutputs d &&
       case dLookupVertex v d of
         Just (DBoundary _) -> True

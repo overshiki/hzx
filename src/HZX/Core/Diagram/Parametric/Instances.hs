@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 -- | Concrete implementation of parametric ZX diagrams and their operations.
@@ -39,12 +40,21 @@ import HZX.Core.Diagram.Types
   , bundleHasEdges, addEdgeToBundle, removeEdgeFromBundle, normalizeEdge
   , simpleCount, hadamardCount )
 import HZX.Core.Diagram.Parametric.Types
-  ( ParamDiagram(..), ParamVertexType(..), ParamScalar(..), ParamPhase(..) )
+  ( ParamDiagram(..), ParamVertexType(..) )
 import HZX.Core.Diagram.Parametric.Scalar (paramScalarOne)
+import HZX.Rewrite.Generic (Rewritable(..))
 
 -- | Empty parametric diagram.
 pEmpty :: ParamDiagram
 pEmpty = ParamDiagram IM.empty M.empty IM.empty [] [] 0 paramScalarOne
+
+-- | Parametric diagrams are rewritable using the generic combinators.
+instance Rewritable ParamDiagram where
+  type RVertex ParamDiagram = ParamVertexType
+  type REdge ParamDiagram = EdgeBundle
+  rAllVertices = pAllVertices
+  rLookupVertex = pLookupVertex
+  rAllEdges d = M.toList (_pEdges d)
 
 -- | Allocate a single vertex.
 pAllocVertex :: ParamVertexType -> ParamDiagram -> (Vertex, ParamDiagram)
