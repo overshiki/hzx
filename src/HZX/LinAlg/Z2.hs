@@ -94,27 +94,30 @@ vectorAddZ2 = xor
 --   Returns (rank, transformed matrix, pivot columns, transformation matrix).
 --   The transformation matrix T satisfies: T * A = R where R is in REF.
 gaussianEliminate :: Matrix -> Int -> (Int, Matrix, [Int], Matrix)
-gaussianEliminate (Matrix rs) numCols = go 0 0 (rs, IM.empty)
+gaussianEliminate (Matrix rs) numCols = go 0 0 (rs, initT, [])
   where
     numRows = IM.size rs
+    -- Transformation starts as the identity matrix.
+    initT = IM.fromList [(i, setBit 0 i) | i <- IM.keys rs]
     
-    -- State: (current matrix rows, transformation matrix rows)
-    go :: Int -> Int -> (IntMap Integer, IntMap Integer) -> (Int, Matrix, [Int], Matrix)
-    go !r !c (mRows, tRows)
+    -- State: (current matrix rows, transformation matrix rows, pivot columns)
+    go :: Int -> Int -> (IntMap Integer, IntMap Integer, [Int]) -> (Int, Matrix, [Int], Matrix)
+    go !r !c (mRows, tRows, pivots)
       | r >= numRows || c >= numCols = 
           let rank = length [() | (_, rowVal) <- IM.toList mRows, rowVal /= 0]
-          in (rank, Matrix mRows, [], Matrix tRows)
+          in (rank, Matrix mRows, pivots, Matrix tRows)
       | otherwise =
           case findPivot r c mRows of
-            Nothing -> go r (c + 1) (mRows, tRows)
+            Nothing -> go r (c + 1) (mRows, tRows, pivots)
             Just pivotRow ->
               let -- Swap rows if necessary
-                  mRows1 = if pivotRow == r then mRows else swapRows r pivotRow mRows
-                  tRows1 = if pivotRow == r then tRows else swapRows r pivotRow tRows
+                  (mRows1, tRows1) = if pivotRow == r
+                                     then (mRows, tRows)
+                                     else (swapRows r pivotRow mRows, swapRows r pivotRow tRows)
                   -- Eliminate below
                   pivotVal = fromMaybe 0 (IM.lookup r mRows1)
                   (mRows2, tRows2) = foldl' (eliminateRow r c pivotVal) (mRows1, tRows1) [r+1..numRows-1]
-              in go (r + 1) (c + 1) (mRows2, tRows2)
+              in go (r + 1) (c + 1) (mRows2, tRows2, pivots ++ [c])
     
     findPivot :: Int -> Int -> IntMap Integer -> Maybe Int
     findPivot startRow c m = 

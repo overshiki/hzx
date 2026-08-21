@@ -57,7 +57,7 @@ qasmFile = do
   eof
   return (Circuit gs)
 
-data Decl = QReg String Int
+data Decl = QReg String Int | CReg String Int | Include String
 
 header :: Parser ()
 header = do
@@ -69,13 +69,36 @@ header = do
 
 declaration :: Parser Decl
 declaration = do
+  spaces
+  d <- try qregDecl <|> try cregDecl <|> includeDecl
+  spaces
+  return d
+
+qregDecl :: Parser Decl
+qregDecl = do
   void $ string "qreg"
   spaces
   name <- identifier
   sz <- brackets (fromIntegral <$> integer)
   semi
-  spaces
   return (QReg name sz)
+
+cregDecl :: Parser Decl
+cregDecl = do
+  void $ string "creg"
+  spaces
+  name <- identifier
+  sz <- brackets (fromIntegral <$> integer)
+  semi
+  return (CReg name sz)
+
+includeDecl :: Parser Decl
+includeDecl = do
+  void $ string "include"
+  spaces
+  filename <- between (char '"') (char '"') (many (noneOf "\""))
+  semi
+  return (Include filename)
 
 gateStmt :: Parser Gate
 gateStmt = do
@@ -87,21 +110,23 @@ gateStmt = do
 
 singleQubitGate :: Parser Gate
 singleQubitGate = do
-  name <- choice (map string ["h", "s", "t", "x", "y", "z"])
+  name <- choice (map (try . string) ["sdg", "tdg", "h", "s", "t", "x", "y", "z"])
   spaces
   q <- qubitRef
   return $ case name of
-    "h" -> H q
-    "s" -> S q
-    "t" -> T q
-    "x" -> XPhase q (1 % 1)
-    "y" -> XPhase q (1 % 2)  -- approximation; Y is not directly in our gate set
-    "z" -> ZPhase q (1 % 1)
-    _   -> error "unknown single qubit gate"
+    "h"   -> H q
+    "s"   -> S q
+    "sdg" -> ZPhase q (-1 % 2)
+    "t"   -> T q
+    "tdg" -> ZPhase q (-1 % 4)
+    "x"   -> XPhase q (1 % 1)
+    "y"   -> XPhase q (1 % 2)  -- approximation; Y is not directly in our gate set
+    "z"   -> ZPhase q (1 % 1)
+    _     -> error "unknown single qubit gate"
 
 twoQubitGate :: Parser Gate
 twoQubitGate = do
-  name <- choice (map string ["cx", "cz", "swap"])
+  name <- choice (map (try . string) ["cx", "cz", "swap"])
   spaces
   q1 <- qubitRef
   comma

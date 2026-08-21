@@ -14,11 +14,13 @@ import HZX.Rewrite.Rule
 type Strategy = Diagram -> Diagram
 
 -- | Repeatedly apply a rule until it no longer applies.
+--   If a rule reports progress without changing the diagram, stop to avoid
+--   an infinite loop.
 runStrategy :: Rule -> Strategy
 runStrategy r d =
   case r d of
     Nothing  -> d
-    Just d'  -> runStrategy r d'
+    Just d'  -> if d' == d then d else runStrategy r d'
 
 -- | Spider fusion followed by self-loop removal.
 spiderSimp :: Strategy

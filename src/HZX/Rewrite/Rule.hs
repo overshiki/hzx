@@ -34,12 +34,25 @@ hadamardEdgeSimp d = IM.foldrWithKey tryVertex Nothing (_vertices d)
         nb <- IM.lookup v (_neighborMap d)
         let ns = M.toList nb
         case ns of
-          [(a, _), (b, _)] | a /= b ->
-            let d1 = removeVertex v d
-                d2 = addEdge a b Hadamard d1
-            in Just d2
+          [(a, b1), (b, b2)]
+            | a /= b
+            , edgeCount b1 == 1
+            , edgeCount b2 == 1 ->
+                -- An HBox is a Hadamard gate.  The path a --e1-- HBox --e2-- b
+                -- therefore contains (e1 + 1 + e2) Hadamards in series.
+                -- Two Hadamards in series cancel, so the replacement edge is
+                -- Hadamard iff this total is odd.
+                let d1 = removeVertex v d
+                    d2 = addEdge a b (replacementType b1 b2) d1
+                in Just d2
           _ -> Nothing
     tryVertex _ _ acc = acc
+
+    edgeCount b = simpleCount b + hadamardCount b
+
+    replacementType b1 b2 =
+      let totalHadamards = hadamardCount b1 + 1 + hadamardCount b2
+      in if odd totalHadamards then Hadamard else Simple
 
 spiderFusion :: Rule
 spiderFusion d = listToMaybe $ mapMaybe tryPair pairs
@@ -50,14 +63,17 @@ spiderFusion d = listToMaybe $ mapMaybe tryPair pairs
     tryPair (v1, v2) = do
       t1 <- IM.lookup v1 (_vertices d)
       t2 <- IM.lookup v2 (_vertices d)
-      case (t1, t2) of
-        (Z p1, Z p2) -> fuse v1 v2 p1 p2 Z
-        (X p1, X p2) -> fuse v1 v2 p1 p2 X
-        _            -> Nothing
-
-    fuse v1 v2 p1 p2 mk = do 
+      -- Spiders fuse only when connected by simple edges (no Hadamard edges).
       nb <- IM.lookup v1 (_neighborMap d)
-      if not (M.member v2 nb) then Nothing else do
+      bndl <- M.lookup v2 nb
+      if hadamardCount bndl > 0 then Nothing else
+        case (t1, t2) of
+          (Z p1, Z p2) -> fuse v1 v2 p1 p2 Z bndl
+          (X p1, X p2) -> fuse v1 v2 p1 p2 X bndl
+          _            -> Nothing
+
+    fuse v1 v2 p1 p2 mk bndl = do
+      if simpleCount bndl == 0 then Nothing else do
         let v2Nbs = neighborBundles v2 d
             dWithoutV2 = removeVertex v2 d
             redirect acc (w, bndl) =

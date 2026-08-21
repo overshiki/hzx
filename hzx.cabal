@@ -23,6 +23,9 @@ library
         HZX.Circuit
         HZX.Circuit.ToDiagram
         HZX.Circuit.FromDiagram
+        HZX.Circuit.Extraction
+        HZX.Circuit.Extraction.Types
+        HZX.Circuit.Extraction.Flow
         HZX.Rewrite.Rule
         HZX.Rewrite.Strategy
         HZX.Rewrite.Matcher
@@ -48,6 +51,7 @@ executable hzx
     main-is:          Main.hs
     build-depends:
         base ^>=4.18.3.0,
+        containers ^>=0.6.7,
         hzx
     hs-source-dirs:   app
     default-language: Haskell2010
