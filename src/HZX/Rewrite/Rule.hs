@@ -12,6 +12,7 @@ module HZX.Rewrite.Rule
   , bialgebraSimp
   , localComplementation
   , pivot
+  , simplifyEdgeBundles
   ) where
 
 import qualified Data.IntMap as IM
@@ -414,3 +415,23 @@ pivot d = listToMaybe $ mapMaybe tryEdge hadamardEdges
 
     addPhaseToZ delta w acc =
       acc { _vertices = IM.adjust (\ty -> case ty of Z p -> Z (addPhase p delta); _ -> ty) w (_vertices acc) }
+
+-- | Canonicalise parallel edge bundles.
+--
+--   Multiple simple edges collapse to one, Hadamard edges are taken modulo 2,
+--   and a simple edge together with an odd number of Hadamard edges becomes a
+--   single Hadamard edge.  This is required before pivot / local-complementation
+--   rules, which assume a simple graph of Hadamard edges between interior spiders.
+simplifyEdgeBundles :: Rule
+simplifyEdgeBundles d =
+  let d' = M.foldrWithKey canonicalize d (_edges d)
+  in if d' == d then Nothing else Just d'
+  where
+    canonicalize (v1, v2) b acc =
+      let hParity = hadamardCount b `mod` 2
+          sCount  = if simpleCount b > 0 then 1 else 0
+          newB    = case (sCount, hParity) of
+                      (_, 1) -> EdgeBundle 0 1
+                      (1, 0) -> EdgeBundle 1 0
+                      _      -> emptyBundle
+      in updateEdge v1 v2 newB acc

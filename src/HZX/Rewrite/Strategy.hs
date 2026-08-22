@@ -67,20 +67,24 @@ toGraphLike d =
 -- local complementation and pivoting until no more rules apply.
 cliffordSimp :: Strategy
 cliffordSimp d0 =
-  let d1 = toGraphLike d0
+  let d0' = basicSimp d0
+      d1 = toGraphLike d0'
       d2 = runStrategy cliffordRule d1
   in d2
   where
     cliffordRule d =
-      case localComplementation d of
+      case simplifyEdgeBundles d of
         Just d' -> Just d'
         Nothing ->
-          case pivot d of
+          case localComplementation d of
             Just d' -> Just d'
             Nothing ->
-              case spiderFusion d of
+              case pivot d of
                 Just d' -> Just d'
                 Nothing ->
-                  case identityRemoval d of
+                  case spiderFusion d of
                     Just d' -> Just d'
-                    Nothing -> Nothing
+                    Nothing ->
+                      case identityRemoval d of
+                        Just d' -> Just d'
+                        Nothing -> Nothing
