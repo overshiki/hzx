@@ -335,11 +335,12 @@ localComplementation d = listToMaybe $ mapMaybe tryVertex interiorZ
     tryVertex v = do
       t <- IM.lookup v (_vertices d)
       let nbs = neighbors v d
+          -- Local complementation adds the removed spider's phase to each
+          -- neighbour.  We restrict to Pauli spiders, so the phase is 0, π,
+          -- or -π.
           delta = case t of
-            Z p | p == 0       -> 1 % 2
-                | p == 1 % 1   -> (-1) % 2
-                | p == (-1) % 1-> (-1) % 2
-            _                  -> 0
+            Z p -> p
+            _   -> 0
           n = length nbs
       let d1 = toggleNeighborEdges v nbs d
       let d2 = foldl (\acc w -> acc { _vertices = IM.adjust (addDeltaToZ delta) w (_vertices acc) }) d1 nbs
@@ -383,7 +384,7 @@ pivot d = listToMaybe $ mapMaybe tryEdge hadamardEdges
       let (alpha, beta) = case (tU, tV) of
             (Z a, Z b) -> (a, b)
             _          -> (0, 0)
-      if not (isPauli alpha || isPauli beta) then Nothing else do
+      if not (isClifford alpha && isClifford beta) then Nothing else do
         let nu = filter (/= v) (neighbors u d)
             nv = filter (/= u) (neighbors v d)
         if any (\w -> case IM.lookup w (_vertices d) of Just (Boundary _) -> True; _ -> False) (u : v : nu ++ nv)
@@ -402,6 +403,16 @@ pivot d = listToMaybe $ mapMaybe tryEdge hadamardEdges
           return d6
 
     isPauli p = p == 0 || p == 1 % 1 || p == (-1) % 1
+
+    isClifford :: Rational -> Bool
+    isClifford p =
+      let p' = phaseMod2 p
+      in p' == 0 || p' == 1 % 2 || p' == 1 || p' == 3 % 2
+      where
+        phaseMod2 x =
+          let q = fromInteger (floor (fromRational x / (2 :: Double))) * (2 :: Rational)
+              r = x - q
+          in if r < 0 then r + 2 else r
 
     toggleHadamard a b acc =
       let bundle = M.findWithDefault emptyBundle (normalizeEdge a b) (_edges acc)
@@ -428,10 +439,14 @@ simplifyEdgeBundles d =
   in if d' == d then Nothing else Just d'
   where
     canonicalize (v1, v2) b acc =
-      let hParity = hadamardCount b `mod` 2
-          sCount  = if simpleCount b > 0 then 1 else 0
-          newB    = case (sCount, hParity) of
-                      (_, 1) -> EdgeBundle 0 1
-                      (1, 0) -> EdgeBundle 1 0
-                      _      -> emptyBundle
-      in updateEdge v1 v2 newB acc
+      case (IM.lookup v1 (_vertices d), IM.lookup v2 (_vertices d)) of
+        (Just (Boundary _), _) -> acc
+        (_, Just (Boundary _)) -> acc
+        _ ->
+          let hParity = hadamardCount b `mod` 2
+              sCount  = if simpleCount b > 0 then 1 else 0
+              newB    = case (sCount, hParity) of
+                          (_, 1) -> EdgeBundle 0 1
+                          (1, 0) -> EdgeBundle 1 0
+                          _      -> emptyBundle
+          in updateEdge v1 v2 newB acc

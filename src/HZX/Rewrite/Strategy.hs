@@ -76,15 +76,12 @@ cliffordSimp d0 =
       case simplifyEdgeBundles d of
         Just d' -> Just d'
         Nothing ->
-          case localComplementation d of
+          case pivot d of
             Just d' -> Just d'
             Nothing ->
-              case pivot d of
+              case spiderFusion d of
                 Just d' -> Just d'
                 Nothing ->
-                  case spiderFusion d of
+                  case identityRemoval d of
                     Just d' -> Just d'
-                    Nothing ->
-                      case identityRemoval d of
-                        Just d' -> Just d'
-                        Nothing -> Nothing
+                    Nothing -> Nothing
