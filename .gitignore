@@ -4,3 +4,5 @@ doc-ch
 doc-tutorial
 ref
 devlog
+*.hi
+*.o

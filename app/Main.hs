@@ -4,6 +4,7 @@ import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO (hPutStrLn, stderr)
 
+import Data.Char (toLower)
 import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import Data.Ratio (numerator, denominator)
@@ -11,7 +12,12 @@ import Data.Ratio (numerator, denominator)
 import HZX.Core.Diagram
 import HZX.Circuit
 import HZX.Circuit.ToDiagram
-import HZX.Circuit.FromDiagram (diagramToCircuitResult)
+import HZX.Circuit.FromDiagram (diagramToCircuitResultWith)
+import HZX.Circuit.Extraction
+  ( ExtractionConfig(..)
+  , ExtractionMode(..)
+  , defaultExtractionConfig
+  )
 import HZX.Circuit.Extraction.Types (ExtractionResult(..))
 import HZX.IO.QASM
 import HZX.Rewrite.Strategy
@@ -21,17 +27,35 @@ main = do
   args <- getArgs
   case args of
     [] -> runDemos
-    [inputFile, outputFile] -> runBenchmark inputFile outputFile "basic"
-    [inputFile, outputFile, strategy] -> runBenchmark inputFile outputFile strategy
+    [inputFile, outputFile] ->
+      runBenchmark inputFile outputFile "basic" defaultExtractionConfig
+    [inputFile, outputFile, strategy] ->
+      runBenchmark inputFile outputFile strategy defaultExtractionConfig
+    [inputFile, outputFile, strategy, modeStr] ->
+      case parseExtractionMode modeStr of
+        Left err -> do
+          hPutStrLn stderr err
+          exitFailure
+        Right mode ->
+          runBenchmark inputFile outputFile strategy (defaultExtractionConfig { ecMode = mode })
     _ -> do
-      hPutStrLn stderr "Usage: hzx [input.qasm output.json [strategy]]"
-      hPutStrLn stderr "  strategy: basic | clifford | spider | phasefree (default: basic)"
+      hPutStrLn stderr "Usage: hzx [input.qasm output.json [strategy [extract-mode]]]"
+      hPutStrLn stderr "  strategy:     basic | clifford | spider | phasefree (default: basic)"
+      hPutStrLn stderr "  extract-mode: frontier | gflow (default: frontier)"
       exitFailure
+
+-- | Parse the extraction-mode command-line argument.
+parseExtractionMode :: String -> Either String ExtractionMode
+parseExtractionMode s =
+  case map toLower s of
+    "frontier" -> Right FrontierMode
+    "gflow"    -> Right GFlowMode
+    _          -> Left $ "Unknown extract-mode: " ++ s ++ ". Use frontier|gflow"
 
 -- | Run HZX in benchmark mode: read QASM, simplify, and write a JSON report
 --   containing metrics, extracted QASM, and the simplified graph structure.
-runBenchmark :: FilePath -> FilePath -> String -> IO ()
-runBenchmark inputFile outputFile strategyName = do
+runBenchmark :: FilePath -> FilePath -> String -> ExtractionConfig -> IO ()
+runBenchmark inputFile outputFile strategyName cfg = do
   qasm <- readFile inputFile
   case parseQASM qasm of
     Left err -> do
@@ -40,7 +64,7 @@ runBenchmark inputFile outputFile strategyName = do
     Right circ -> do
       let d0 = circuitToDiagram circ
           d1 = applyStrategy strategyName d0
-      case diagramToCircuitResult d1 of
+      case diagramToCircuitResultWith cfg d1 of
         Extracted extracted _ ->
           writeFile outputFile $ benchmarkJson circ d0 d1 extracted strategyName
         NotExtractable err ->
@@ -72,12 +96,6 @@ benchmarkJson inputCirc inputDiag outputDiag outputCirc strategy =
   ++ "  \"output_qasm\": " ++ show (serializeQASM outputCirc) ++ ",\n"
   ++ "  \"graph\": " ++ graphJson outputDiag ++ "\n"
   ++ "}"
-  where
-    toLower c
-      | c == 'T'  = 't'
-      | c == 'F'  = 'f'
-      | otherwise = c
-
 -- | JSON report when extraction fails.  The output QASM is a valid but empty
 --   circuit so that downstream tooling still receives a parseable string.
 benchmarkJsonError :: Circuit -> Diagram -> Diagram -> String -> String -> String
@@ -96,12 +114,6 @@ benchmarkJsonError inputCirc inputDiag outputDiag strategy err =
   ++ "  \"output_qasm\": " ++ show (serializeHeader (numQubits inputCirc)) ++ ",\n"
   ++ "  \"graph\": " ++ graphJson outputDiag ++ "\n"
   ++ "}"
-  where
-    toLower c
-      | c == 'T'  = 't'
-      | c == 'F'  = 'f'
-      | otherwise = c
-
 serializeHeader :: Int -> String
 serializeHeader n = "OPENQASM 2.0;\nqreg q[" ++ show n ++ "];\n"
 

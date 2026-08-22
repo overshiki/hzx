@@ -28,16 +28,20 @@ data GFlow = GFlow
 
 -- | Mutable state maintained while extracting a circuit.
 data ExtractionState = ExtractionState
-  { esDiagram  :: !Diagram
+  { esDiagram       :: !Diagram
   -- ^ Remaining ZX diagram.  Vertices are removed as they are extracted.
-  , esFrontier :: !(IM.IntMap Vertex)
+  , esFrontier      :: !(IM.IntMap Vertex)
   -- ^ Current frontier: qubit index -> vertex that represents the
   --   "current output" of that qubit line.
-  , esQubitOf  :: !(IM.IntMap QubitIndex)
-  -- ^ Reverse map from a frontier / interior vertex to its logical qubit.
-  , esGates    :: ![Gate]
+  , esQubitOf       :: !(IM.IntMap QubitIndex)
+  -- ^ Reverse map from a current frontier vertex to its logical qubit.
+  , esVertexToQubit :: !(IM.IntMap QubitIndex)
+  -- ^ Map from every vertex that has ever been on a qubit line to its
+  --   logical qubit.  This is needed by the gflow-driven extractor to map
+  --   precomputed correction sets to current qubit indices.
+  , esGates         :: ![Gate]
   -- ^ Extracted gates accumulated in reverse extraction order.
-  , esGFlow    :: !(Maybe GFlow)
+  , esGFlow         :: !(Maybe GFlow)
   -- ^ Optional focused gflow for the original graph-like diagram.
   } deriving (Show)
 
