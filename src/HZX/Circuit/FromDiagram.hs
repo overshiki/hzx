@@ -2,11 +2,13 @@
 
 module HZX.Circuit.FromDiagram
   ( diagramToCircuit
+  , diagramToCircuitResult
   ) where
 
 import HZX.Core.Diagram (Diagram)
 import HZX.Circuit (Circuit(..))
 import HZX.Circuit.Extraction (extractCircuit)
+import HZX.Circuit.Extraction.Types (ExtractionResult(..))
 
 -- | Extract a quantum circuit from a ZX diagram.
 --
@@ -17,5 +19,11 @@ import HZX.Circuit.Extraction (extractCircuit)
 diagramToCircuit :: Diagram -> Circuit
 diagramToCircuit d =
   case extractCircuit d of
-    Left _    -> Circuit []
-    Right circ -> circ
+    Extracted circ _ -> circ
+    _                -> Circuit []
+
+-- | Like 'diagramToCircuit', but preserves the full extraction result so
+--   callers can distinguish success from "not extractable" and unexpected
+--   errors.
+diagramToCircuitResult :: Diagram -> ExtractionResult
+diagramToCircuitResult = extractCircuit

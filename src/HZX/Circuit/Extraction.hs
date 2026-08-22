@@ -18,15 +18,21 @@ import qualified Data.IntMap as IM
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.List (foldl')
-import Data.Maybe (fromMaybe, listToMaybe, mapMaybe, maybeToList)
-import Data.Ratio ((%))
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 
 import HZX.Core.Diagram
 import HZX.Core.Diagram.Types (EdgeType(..))
-import HZX.Core.Phase (addPhase)
 import HZX.Circuit
 import HZX.Rewrite.Rule (hadamardEdgeSimp, colorChange, spiderFusion)
 import qualified HZX.LinAlg.Z2 as Z2
+
+import HZX.Circuit.Extraction.Types
+  ( GFlow
+  , QubitIndex
+  , ExtractionState(..)
+  , ExtractionResult(..)
+  )
+import qualified HZX.Circuit.Extraction.Flow as Flow
 
 -- ---------------------------------------------------------------------------
 -- Public API
@@ -34,17 +40,20 @@ import qualified HZX.LinAlg.Z2 as Z2
 
 -- | Extract a quantum circuit from a ZX diagram.
 --
---   Returns 'Left' with a reason if the diagram is not extractable.
-extractCircuit :: Diagram -> Either String Circuit
+--   Returns 'ExtractionResult' indicating success, a recoverable
+--   "not extractable" failure, or an unexpected extraction error.
+extractCircuit :: Diagram -> ExtractionResult
 extractCircuit d0
-  | not (isWellFormed d0) = Left "diagram is not well-formed"
+  | not (isWellFormed d0) =
+      ExtractionError "diagram is not well-formed"
   | length (inputs d0) /= length (outputs d0) =
-      Left "differing numbers of inputs and outputs"
+      ExtractionError "differing numbers of inputs and outputs"
   | otherwise =
       let d1 = toGraphLike d0
+          mbGFlow = Flow.focusedGFlow d1
       in if hasNoInterior d1
-         then Right (Circuit [])
-         else extractFromGraphLike d1
+         then Extracted (Circuit []) mbGFlow
+         else extractFromGraphLike d1 mbGFlow
 
 -- ---------------------------------------------------------------------------
 -- Graph-like conversion
@@ -82,25 +91,15 @@ hasNoInterior d = all (isBoundaryVertex d) (allVertices d)
 -- Main extraction loop
 -- ---------------------------------------------------------------------------
 
-extractFromGraphLike :: Diagram -> Either String Circuit
-extractFromGraphLike d0 = do
-  st0 <- initExtractionState d0
-  st1 <- extractLoop st0
-  return $ Circuit $ reverse (esGates st1)
+extractFromGraphLike :: Diagram -> Maybe GFlow -> ExtractionResult
+extractFromGraphLike d0 mbGFlow =
+  case initExtractionState d0 mbGFlow of
+    Left err    -> ExtractionError err
+    Right st0   -> extractLoop st0
 
-data ExtractionState = ExtractionState
-  { esDiagram  :: !Diagram
-  , esFrontier :: !(IM.IntMap Vertex)   -- qubit -> frontier vertex
-  , esQubitOf  :: !(IM.IntMap QubitIndex) -- vertex -> qubit
-  , esGates    :: ![Gate]
-  } deriving (Show)
-
-type QubitIndex = Int
-
-initExtractionState :: Diagram -> Either String ExtractionState
-initExtractionState d = do
+initExtractionState :: Diagram -> Maybe GFlow -> Either String ExtractionState
+initExtractionState d mbGFlow = do
   let outs = outputs d
-      ins  = inputs d
   if null outs
     then Left "no outputs"
     else do
@@ -116,23 +115,31 @@ initExtractionState d = do
         , esFrontier = frontier0
         , esQubitOf  = qubitOf0
         , esGates    = []
+        , esGFlow    = mbGFlow
         }
 
-extractLoop :: ExtractionState -> Either String ExtractionState
+extractLoop :: ExtractionState -> ExtractionResult
 extractLoop = go 0
   where
     go n st
-      | IM.null (esFrontier st) = Right st
-      | n > 100 = Left "extraction loop exceeded iteration limit"
-      | otherwise = do
-            st1 <- cleanFrontier st
-            let st2 = removeFrontierInputs st1
-            case neighborsOfFrontier st2 of
-              Nothing -> Right st2
-              Just (neighbors, st3) -> do
-                (cnots, st4) <- extractCNOTs neighbors st3
-                st5 <- applyCNOTs cnots neighbors st4
-                go (n + 1) st5
+      | IM.null (esFrontier st) =
+          Extracted (Circuit $ reverse (esGates st)) (esGFlow st)
+      | n > 100 =
+          NotExtractable "extraction loop exceeded iteration limit"
+      | otherwise =
+          case cleanFrontier st of
+            Left err -> ExtractionError err
+            Right st1 ->
+              let st2 = removeFrontierInputs st1
+              in case neighborsOfFrontier st2 of
+                   Nothing -> Extracted (Circuit $ reverse (esGates st2)) (esGFlow st2)
+                   Just (neighbors, st3) ->
+                     case extractCNOTs neighbors st3 of
+                       Left err -> NotExtractable err
+                       Right (cnots, st4) ->
+                         case applyCNOTs cnots neighbors st4 of
+                           Left err    -> NotExtractable err
+                           Right st5   -> go (n + 1) st5
 
 -- ---------------------------------------------------------------------------
 -- Frontier cleaning: extract single-qubit gates and CZs

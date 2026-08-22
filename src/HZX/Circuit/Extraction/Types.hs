@@ -3,12 +3,9 @@
 -- | Core types for graph-theoretic ZX circuit extraction.
 module HZX.Circuit.Extraction.Types
   ( GFlow(..)
+  , QubitIndex
   , ExtractionState(..)
   , ExtractionResult(..)
-  , QubitIndex
-  , emptyExtractionState
-  , addGate
-  , addGates
   ) where
 
 import qualified Data.IntMap as IM
@@ -36,33 +33,20 @@ data ExtractionState = ExtractionState
   , esFrontier :: !(IM.IntMap Vertex)
   -- ^ Current frontier: qubit index -> vertex that represents the
   --   "current output" of that qubit line.
-  , esOutputs  :: !(IM.IntMap Vertex)
-  -- ^ Original output boundaries, indexed by qubit.
-  , esCircuit  :: ![Gate]
-  -- ^ Extracted gates accumulated in reverse order.
+  , esQubitOf  :: !(IM.IntMap QubitIndex)
+  -- ^ Reverse map from a frontier / interior vertex to its logical qubit.
+  , esGates    :: ![Gate]
+  -- ^ Extracted gates accumulated in reverse extraction order.
+  , esGFlow    :: !(Maybe GFlow)
+  -- ^ Optional focused gflow for the original graph-like diagram.
   } deriving (Show)
 
 -- | Result of extraction.
 data ExtractionResult
-  = Extracted !Circuit
+  = Extracted
+      { extractedCircuit :: !Circuit
+      , extractedGFlow   :: !(Maybe GFlow)
+      }
   | NotExtractable !String
   | ExtractionError !String
   deriving (Eq, Show)
-
--- | Build an initial extraction state from a graph-like diagram.
-emptyExtractionState :: Diagram -> ExtractionState
-emptyExtractionState d =
-  ExtractionState
-    { esDiagram  = d
-    , esFrontier = IM.fromList (zip [0..] (outputs d))
-    , esOutputs  = IM.fromList (zip [0..] (outputs d))
-    , esCircuit  = []
-    }
-
--- | Prepend a single gate to the extracted circuit.
-addGate :: Gate -> ExtractionState -> ExtractionState
-addGate g st = st { esCircuit = g : esCircuit st }
-
--- | Prepend several gates to the extracted circuit.
-addGates :: [Gate] -> ExtractionState -> ExtractionState
-addGates gs st = st { esCircuit = gs ++ esCircuit st }

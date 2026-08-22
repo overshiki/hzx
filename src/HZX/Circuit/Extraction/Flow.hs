@@ -53,44 +53,45 @@ focusedGFlow d =
     -- Find a vertex not on the frontier whose neighbours (except itself) are
     -- all on the frontier, and for which a correction set exists.
     findCandidate :: S.Set Vertex -> Maybe (Vertex, [Vertex])
-    findCandidate frontier = listToMaybe candidates
-      where
-        candidates = mapMaybe (tryVertex frontier) (S.toList (allVerts S.\\ frontier))
+    findCandidate frontier =
+      let outside    = allVerts S.\\ frontier
+          interiors  = S.filter (not . isBoundaryVertex) outside
+          boundaries = S.filter isBoundaryVertex outside
+      in case listToMaybe (mapMaybe (tryInterior frontier) (S.toList interiors)) of
+           Just c  -> Just c
+           Nothing -> if S.null interiors && not (S.null boundaries)
+                      then Just (S.findMin boundaries, [])
+                      else Nothing
 
-    tryVertex :: S.Set Vertex -> Vertex -> Maybe (Vertex, [Vertex])
-    tryVertex frontier v = do
-      let nbs = neighbors v d
-      if all (\w -> w == v || w `S.member` frontier) nbs
-        then do
-          corrSet <- findCorrectionSet frontier v
-          return (v, corrSet)
-        else Nothing
+    isBoundaryVertex :: Vertex -> Bool
+    isBoundaryVertex v = case IM.lookup v (_vertices d) of
+                           Just (Boundary _) -> True
+                           _                 -> False
+
+    tryInterior :: S.Set Vertex -> Vertex -> Maybe (Vertex, [Vertex])
+    tryInterior frontier v = do
+      corrSet <- findCorrectionSet frontier v
+      return (v, corrSet)
 
     -- Solve for a correction set U \subseteq frontier such that:
-    --   * v \in U
-    --   * for every w \notin frontier, w /= v: |N(w) \cap U| is even.
+    --   Odd(U) \cap (V \\ frontier) = {v}.
+    --   Equivalently, for every outside vertex w:
+    --     sum_{u in U, u~w} 1 = 1 (mod 2) iff w = v.
     findCorrectionSet :: S.Set Vertex -> Vertex -> Maybe [Vertex]
     findCorrectionSet frontier v = do
       let frontierList = S.toList frontier
           frontierIdx  = IM.fromList (zip frontierList [0..])
           outside      = S.toList (allVerts S.\\ frontier)
-          equations    = [ (w, equationRow frontierList w) | w <- outside, w /= v ]
-          vIdx         = IM.lookup v frontierIdx
-
-      vCol <- vIdx
+          equations    = [ (w, equationRow frontierList w) | w <- outside ]
 
       let n = S.size frontier
-          -- A is rows x n matrix; b is the right-hand side vector.
-          -- The equation for w is: (N(w) \cap U) even, i.e. sum = 0.
-          -- Because v is forced into U, move v's contribution to RHS.
           aRows = [ rowBits | (_, rowBits) <- equations ]
-          bVec  = [ if testBit rowBits vCol then 1 else 0
-                  | (_, rowBits) <- equations ]
+          bVec  = [ if w == v then 1 else 0 | (w, _) <- equations ]
           aMat  = Z2.fromLists [ [ if testBit r j then 1 else 0 | j <- [0..n-1] ] | r <- aRows ]
 
       solution <- Z2.solveLinearSystem aMat bVec n
 
-      let setBits = setBit (toBits solution) vCol
+      let setBits = toBits solution
           corrSet = [ u | (u, idx) <- IM.toList frontierIdx, testBit setBits idx ]
       return corrSet
       where

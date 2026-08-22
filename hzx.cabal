@@ -65,6 +65,7 @@ test-suite hzx-test
         Test.Rewrite
         Test.RoundTrip
         Test.STIM
+        Test.BugReport
     build-depends:
         base ^>=4.18.3.0,
         containers ^>=0.6.7,

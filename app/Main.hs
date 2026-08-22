@@ -11,7 +11,8 @@ import Data.Ratio (numerator, denominator)
 import HZX.Core.Diagram
 import HZX.Circuit
 import HZX.Circuit.ToDiagram
-import HZX.Circuit.FromDiagram
+import HZX.Circuit.FromDiagram (diagramToCircuitResult)
+import HZX.Circuit.Extraction.Types (ExtractionResult(..))
 import HZX.IO.QASM
 import HZX.Rewrite.Strategy
 
@@ -39,8 +40,13 @@ runBenchmark inputFile outputFile strategyName = do
     Right circ -> do
       let d0 = circuitToDiagram circ
           d1 = applyStrategy strategyName d0
-          extracted = diagramToCircuit d1
-      writeFile outputFile $ benchmarkJson circ d0 d1 extracted strategyName
+      case diagramToCircuitResult d1 of
+        Extracted extracted _ ->
+          writeFile outputFile $ benchmarkJson circ d0 d1 extracted strategyName
+        NotExtractable err ->
+          writeFile outputFile $ benchmarkJsonError circ d0 d1 strategyName err
+        ExtractionError err ->
+          writeFile outputFile $ benchmarkJsonError circ d0 d1 strategyName err
 
 applyStrategy :: String -> Diagram -> Diagram
 applyStrategy name d = case name of
@@ -62,6 +68,7 @@ benchmarkJson inputCirc inputDiag outputDiag outputCirc strategy =
   ++ "  \"well_formed\": " ++ map toLower (show (isWellFormed outputDiag)) ++ ",\n"
   ++ "  \"extracted_gates\": " ++ show (length (gates outputCirc)) ++ ",\n"
   ++ "  \"t_count\": " ++ show (countTGates outputCirc) ++ ",\n"
+  ++ "  \"extraction_error\": null,\n"
   ++ "  \"output_qasm\": " ++ show (serializeQASM outputCirc) ++ ",\n"
   ++ "  \"graph\": " ++ graphJson outputDiag ++ "\n"
   ++ "}"
@@ -70,6 +77,33 @@ benchmarkJson inputCirc inputDiag outputDiag outputCirc strategy =
       | c == 'T'  = 't'
       | c == 'F'  = 'f'
       | otherwise = c
+
+-- | JSON report when extraction fails.  The output QASM is a valid but empty
+--   circuit so that downstream tooling still receives a parseable string.
+benchmarkJsonError :: Circuit -> Diagram -> Diagram -> String -> String -> String
+benchmarkJsonError inputCirc inputDiag outputDiag strategy err =
+  "{\n"
+  ++ "  \"strategy\": \"" ++ strategy ++ "\",\n"
+  ++ "  \"input_gates\": " ++ show (length (gates inputCirc)) ++ ",\n"
+  ++ "  \"input_vertices\": " ++ show (numVertices inputDiag) ++ ",\n"
+  ++ "  \"input_edges\": " ++ show (numEdges inputDiag) ++ ",\n"
+  ++ "  \"output_vertices\": " ++ show (numVertices outputDiag) ++ ",\n"
+  ++ "  \"output_edges\": " ++ show (numEdges outputDiag) ++ ",\n"
+  ++ "  \"well_formed\": " ++ map toLower (show (isWellFormed outputDiag)) ++ ",\n"
+  ++ "  \"extracted_gates\": 0,\n"
+  ++ "  \"t_count\": 0,\n"
+  ++ "  \"extraction_error\": " ++ show err ++ ",\n"
+  ++ "  \"output_qasm\": " ++ show (serializeHeader (numQubits inputCirc)) ++ ",\n"
+  ++ "  \"graph\": " ++ graphJson outputDiag ++ "\n"
+  ++ "}"
+  where
+    toLower c
+      | c == 'T'  = 't'
+      | c == 'F'  = 'f'
+      | otherwise = c
+
+serializeHeader :: Int -> String
+serializeHeader n = "OPENQASM 2.0;\nqreg q[" ++ show n ++ "];\n"
 
 graphJson :: Diagram -> String
 graphJson d =

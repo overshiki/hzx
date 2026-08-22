@@ -99,13 +99,13 @@ gaussianEliminate (Matrix rs) numCols = go 0 0 (rs, initT, [])
     numRows = IM.size rs
     -- Transformation starts as the identity matrix.
     initT = IM.fromList [(i, setBit 0 i) | i <- IM.keys rs]
-    
+
     -- State: (current matrix rows, transformation matrix rows, pivot columns)
     go :: Int -> Int -> (IntMap Integer, IntMap Integer, [Int]) -> (Int, Matrix, [Int], Matrix)
     go !r !c (mRows, tRows, pivots)
-      | r >= numRows || c >= numCols = 
-          let rank = length [() | (_, rowVal) <- IM.toList mRows, rowVal /= 0]
-          in (rank, Matrix mRows, pivots, Matrix tRows)
+      | r >= numRows || c >= numCols =
+          -- In row-echelon form the number of pivots equals the rank.
+          (length pivots, Matrix mRows, reverse pivots, Matrix tRows)
       | otherwise =
           case findPivot r c mRows of
             Nothing -> go r (c + 1) (mRows, tRows, pivots)
@@ -117,7 +117,7 @@ gaussianEliminate (Matrix rs) numCols = go 0 0 (rs, initT, [])
                   -- Eliminate below
                   pivotVal = fromMaybe 0 (IM.lookup r mRows1)
                   (mRows2, tRows2) = foldl' (eliminateRow r c pivotVal) (mRows1, tRows1) [r+1..numRows-1]
-              in go (r + 1) (c + 1) (mRows2, tRows2, pivots ++ [c])
+              in go (r + 1) (c + 1) (mRows2, tRows2, c : pivots)
     
     findPivot :: Int -> Int -> IntMap Integer -> Maybe Int
     findPivot startRow c m = 
